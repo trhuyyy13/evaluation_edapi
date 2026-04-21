@@ -59,16 +59,16 @@ def main():
     print(f"[*] Đang sử dụng thiết bị: {device}")
 
     # 2. Khởi tạo Tokenizer
-    print(f"[*] Đang tải tokenizer từ: {PRETRAINED_PATH}")
-    tokenizer = AutoTokenizer.from_pretrained(PRETRAINED_PATH, trust_remote_code=True)
+    print(f"[*] Đang tải tokenizer từ: {MODEL_NAME}")
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
     tokenizer.pad_token = tokenizer.eos_token
     # BẮT BUỘC: Left-padding khi chạy batch generation cho model Decoder-only
     tokenizer.padding_side = "left"
 
     # 3. Khởi tạo Model
-    print(f"[*] Đang tải model từ: {PRETRAINED_PATH}")
+    print(f"[*] Đang tải model từ: {MODEL_NAME}")
     model = AutoModelForCausalLM.from_pretrained(
-        PRETRAINED_PATH,
+        MODEL_NAME,
         device_map="auto",
         torch_dtype=torch.bfloat16, 
         trust_remote_code=True
