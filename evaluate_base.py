@@ -45,7 +45,7 @@ def prepare_requests(data):
     return requests
 
 def main():
-    model_name = "HuyTran1301/Deepseek_PROD_ApiDeprecated"
+    model_name = "deepseek-ai/deepseek-coder-1.3b-instruct""
     script_dir = os.path.dirname(os.path.abspath(__file__))
     local_pretrained_path = os.path.join(script_dir, "deepseek_unlearned_simnpo")
     model_path = local_pretrained_path if os.path.isdir(local_pretrained_path) else model_name
