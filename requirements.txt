@@ -1,0 +1,8 @@
+torch
+transformers
+numpy
+tqdm
+scipy
+nltk
+evaluate
+rouge_score
