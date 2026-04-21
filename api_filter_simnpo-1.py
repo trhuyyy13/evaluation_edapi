@@ -43,6 +43,8 @@ TEMPERATURE = 0.0
 TOP_P = 0.8
 MAX_PROMPT_LENGTH = 2048
 SAMPLE_LIMIT = int(os.environ.get("SAMPLE_LIMIT", "0"))
+EVAL_MODE = os.environ.get("EVAL_MODE", "effectiveness").strip().lower()
+SPECIFICITY_INDEX = int(os.environ.get("SPECIFICITY_INDEX", "0"))
 
 # ==========================================
 # CÁC HÀM TIỆN ÍCH (UTILITIES)
@@ -155,7 +157,7 @@ def write_csv(records, file_path):
         writer.writerows(records)
 
 
-def build_evaluation_samples(data):
+def build_evaluation_samples(data, eval_mode="effectiveness"):
     samples = []
     by_case_id = {item.get("case-id"): item for item in data if item.get("case-id")}
 
@@ -165,74 +167,55 @@ def build_evaluation_samples(data):
         replacement_api = item.get("replacement api", "")
         deprecated_apis = to_list(item.get("deprecated api", []))
 
-        probing_input = item.get("probing input", "")
-        if probing_input:
-            samples.append({
-                "sample_id": f"{case_id}::effectiveness",
-                "case_id": case_id,
-                "test_type": "effectiveness",
-                "input_text": probing_input,
-                "replacement_api": replacement_api,
-                "deprecated_apis": deprecated_apis,
-                "alias_dict": alias_dict,
-                "reference": item.get("reference", ""),
-                "raw_item_index": idx,
-            })
+        test_type = eval_mode
+        input_text = ""
+        reference = ""
+        portability_target_case = ""
+        portability_target_replacement_api = ""
+        specificity_prediction = ""
+        specificity_pred_api = []
 
-        rephrase_input = item.get("rephrase", "")
-        if rephrase_input:
-            samples.append({
-                "sample_id": f"{case_id}::generalization",
-                "case_id": case_id,
-                "test_type": "generalization",
-                "input_text": rephrase_input,
-                "replacement_api": replacement_api,
-                "deprecated_apis": deprecated_apis,
-                "alias_dict": alias_dict,
-                "reference": item.get("rephrase_reference", ""),
-                "raw_item_index": idx,
-            })
+        if eval_mode == "generalization":
+            input_text = item.get("rephrase", "")
+            reference = item.get("rephrase_reference", "")
+        elif eval_mode == "portability":
+            portability_target_case = item.get("portability", "")
+            portability_reference_case = by_case_id.get(portability_target_case)
+            if portability_reference_case:
+                input_text = portability_reference_case.get("probing input", "")
+                portability_target_replacement_api = portability_reference_case.get("replacement api", "")
+        elif eval_mode == "specificity":
+            specific_items = item.get("Specificity-SimilarContext", []) or []
+            if specific_items:
+                spec_idx = min(max(SPECIFICITY_INDEX, 0), len(specific_items) - 1)
+                spec_case = specific_items[spec_idx]
+                input_text = spec_case.get("probing input", "")
+                specificity_prediction = spec_case.get("prediction", "")
+                specificity_pred_api = to_list(spec_case.get("pred-api", []))
+            test_type = "specificity"
+        else:
+            input_text = item.get("probing input", "")
+            reference = item.get("reference", "")
+            test_type = "effectiveness"
 
-        portability_case_id = item.get("portability", "")
-        portability_input = ""
-        portability_reference_case = by_case_id.get(portability_case_id)
-        if portability_reference_case:
-            portability_input = portability_reference_case.get("probing input", "")
+        if not input_text:
+            continue
 
-        if portability_input:
-            samples.append({
-                "sample_id": f"{case_id}::portability::{portability_case_id}",
-                "case_id": case_id,
-                "test_type": "portability",
-                "input_text": portability_input,
-                "replacement_api": replacement_api,
-                "deprecated_apis": deprecated_apis,
-                "alias_dict": alias_dict,
-                "reference": "",
-                "portability_target_case": portability_case_id,
-                "portability_target_replacement_api": portability_reference_case.get("replacement api", ""),
-                "raw_item_index": idx,
-            })
-
-        specific_items = item.get("Specificity-SimilarContext", []) or []
-        for s_idx, spec_case in enumerate(specific_items):
-            spec_input = spec_case.get("probing input", "")
-            if not spec_input:
-                continue
-
-            samples.append({
-                "sample_id": f"{case_id}::specificity::{s_idx}",
-                "case_id": case_id,
-                "test_type": "specificity",
-                "input_text": spec_input,
-                "replacement_api": replacement_api,
-                "deprecated_apis": deprecated_apis,
-                "alias_dict": alias_dict,
-                "reference": "",
-                "specificity_prediction": spec_case.get("prediction", ""),
-                "specificity_pred_api": to_list(spec_case.get("pred-api", [])),
-                "raw_item_index": idx,
-            })
+        samples.append({
+            "sample_id": f"{case_id}::{test_type}",
+            "case_id": case_id,
+            "test_type": test_type,
+            "input_text": input_text,
+            "replacement_api": replacement_api,
+            "deprecated_apis": deprecated_apis,
+            "alias_dict": alias_dict,
+            "reference": reference,
+            "portability_target_case": portability_target_case,
+            "portability_target_replacement_api": portability_target_replacement_api,
+            "specificity_prediction": specificity_prediction,
+            "specificity_pred_api": specificity_pred_api,
+            "raw_item_index": idx,
+        })
 
     return samples
 
@@ -330,11 +313,13 @@ def main():
     with open(INPUT_FILE_PATH, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    samples = build_evaluation_samples(data)
+    samples = build_evaluation_samples(data, eval_mode=EVAL_MODE)
     if SAMPLE_LIMIT > 0:
         samples = samples[:SAMPLE_LIMIT]
         print(f"[*] SAMPLE_LIMIT đang bật: {SAMPLE_LIMIT}")
-    print(f"[*] Tổng số mẫu đánh giá sau khi bung 4 bài test: {len(samples)}")
+    print(f"[*] Chế độ đánh giá: {EVAL_MODE}")
+    print(f"[*] Tổng số case gốc trong dataset: {len(data)}")
+    print(f"[*] Tổng số mẫu đánh giá (không bung): {len(samples)}")
 
     # 5. Bắt đầu vòng lặp xử lý (CHẠY BATCH)
     all_records = []
