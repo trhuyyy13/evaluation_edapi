@@ -42,6 +42,7 @@ MAX_NEW_TOKENS = 128
 TEMPERATURE = 0.0
 TOP_P = 0.8
 MAX_PROMPT_LENGTH = 2048
+SAMPLE_LIMIT = int(os.environ.get("SAMPLE_LIMIT", "0"))
 
 # ==========================================
 # CÁC HÀM TIỆN ÍCH (UTILITIES)
@@ -330,6 +331,9 @@ def main():
         data = json.load(f)
 
     samples = build_evaluation_samples(data)
+    if SAMPLE_LIMIT > 0:
+        samples = samples[:SAMPLE_LIMIT]
+        print(f"[*] SAMPLE_LIMIT đang bật: {SAMPLE_LIMIT}")
     print(f"[*] Tổng số mẫu đánh giá sau khi bung 4 bài test: {len(samples)}")
 
     # 5. Bắt đầu vòng lặp xử lý (CHẠY BATCH)
