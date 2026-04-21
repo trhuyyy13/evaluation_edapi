@@ -50,17 +50,29 @@ def main():
     dataset_path = os.path.join(script_dir, "dataset", "all.json")
     
     print(f"Loading model: {model_name}")
+    model_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         trust_remote_code=True,
-        torch_dtype=torch.float16,
+        torch_dtype=model_dtype,
     )
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_name,
-        trust_remote_code=True,
-        padding_side="left",
-        use_fast=False,
-    )
+
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            padding_side="left",
+            use_fast=True,
+        )
+    except Exception as e:
+        print(f"Fast tokenizer load failed: {e}")
+        print("Falling back to slow tokenizer...")
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name,
+            trust_remote_code=True,
+            padding_side="left",
+            use_fast=False,
+        )
     
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
