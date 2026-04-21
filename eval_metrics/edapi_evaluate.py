@@ -31,7 +31,13 @@ def compute_edit_quality(
     tokenizer_for_fluency=None,
 ) -> typing.Dict:
     # First, unpack rewrite evaluation record.
-    intent = record['prompt']
+    code_context = record['prompt']
+    prompt_text = (
+        f"Complete and output the next line for the following Python function:\n"
+        f"```python\n"
+        f"{code_context}"
+    )
+    intent = prompt_text
     rewritten_intent = record['rephrase_prompt']
     rewritten_target = record['rephrase_target_new']
     target_snippet = record['target_new']

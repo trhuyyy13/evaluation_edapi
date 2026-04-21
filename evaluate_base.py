@@ -45,7 +45,7 @@ def prepare_requests(data):
     return requests
 
 def main():
-    model_name = "deepseek-ai/deepseek-coder-1.3b-base"
+    model_name = "HuyTran1301/Deepseek_PROD_ApiDeprecated"
     script_dir = os.path.dirname(os.path.abspath(__file__))
     dataset_path = os.path.join(script_dir, "dataset", "all.json")
     
@@ -71,7 +71,7 @@ def main():
     model.eval()
 
     # Số lượng data test. Đổi thành None nếu muốn chạy toàn bộ dataset.
-    num_test_samples = 20
+    num_test_samples = 2
 
     print(f"Loading dataset from: {dataset_path}")
     with open(dataset_path, "r") as f:
