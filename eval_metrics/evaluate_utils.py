@@ -90,7 +90,7 @@ def batch_generate(model, tok, prompts, max_length, sample_generate=False):
     ).to(model.device)
     gen_args = {
             'inputs': prompt_tok['input_ids'],
-            'attention_mask': prompt_tok['input_ids'].ne(tok.pad_token_id),
+            'attention_mask': prompt_tok['attention_mask'],
             'max_new_tokens': max_length,
             'pad_token_id': tok.eos_token_id,
             'eos_token_id': tok.eos_token_id,
@@ -100,6 +100,8 @@ def batch_generate(model, tok, prompts, max_length, sample_generate=False):
             'do_sample': False,
             'num_beams': 1,
             'num_return_sequences': 1,
+            'repetition_penalty': 1.1,
+            'no_repeat_ngram_size': 3,
         }
     with torch.no_grad():
         if sample_generate:
@@ -178,6 +180,9 @@ def clean_pred(pred: str):
     pred = pred.replace("Ċ", "\n")
     pred = pred.replace("<｜end▁of▁sentence｜>", "")
     pred = pred.replace("<|endoftext|>", "")
+    pred = re.sub(r"(\):){4,}", "", pred)
+    pred = re.sub(r"(\]\)){4,}", "", pred)
+    pred = re.sub(r"([\]\)\:\.])\1{8,}", "", pred)
     lines = [line for line in pred.split("\n") if not line.strip().startswith("#")]
     return "\n".join(lines)
 
