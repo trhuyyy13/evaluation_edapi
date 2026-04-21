@@ -16,19 +16,25 @@ BASE_DIR = os.path.dirname(__file__)
 STATUS = "simnpo"
 
 PRETRAINED_PATH = os.path.join(BASE_DIR, "deepseek_unlearned_simnpo")
-INPUT_FILE_PATH = os.path.join(BASE_DIR, "data", "edapi_data_processed.json")
+INPUT_FILE_PATH = os.path.join(BASE_DIR, "dataset", "all.json")
 
-DEP_JSON = os.path.join(BASE_DIR, "data", "stuff", f"dep_api_{STATUS}.json")
-REP_JSON = os.path.join(BASE_DIR, "data", "stuff", f"rep_api_{STATUS}.json")
-MIS_JSON = os.path.join(BASE_DIR, "data", "stuff", f"mis_api_{STATUS}.json")
+OUTPUT_DIR = os.path.join(BASE_DIR, "results", STATUS)
+SUMMARY_JSON = os.path.join(OUTPUT_DIR, "summary.json")
+ALL_RESULTS_JSON = os.path.join(OUTPUT_DIR, "all_results.json")
+ALL_RESULTS_CSV = os.path.join(OUTPUT_DIR, "all_results.csv")
 
-DEP_CSV = os.path.join(BASE_DIR, "csv", f"dep_api_{STATUS}.csv")
-REP_CSV = os.path.join(BASE_DIR, "csv", f"rep_api_{STATUS}.csv")
-MIS_CSV = os.path.join(BASE_DIR, "csv", f"mis_api_{STATUS}.csv")
+EFFECTIVENESS_JSON = os.path.join(OUTPUT_DIR, "effectiveness_results.json")
+GENERALIZATION_JSON = os.path.join(OUTPUT_DIR, "generalization_results.json")
+PORTABILITY_JSON = os.path.join(OUTPUT_DIR, "portability_results.json")
+SPECIFICITY_JSON = os.path.join(OUTPUT_DIR, "specificity_results.json")
+
+EFFECTIVENESS_CSV = os.path.join(OUTPUT_DIR, "effectiveness_results.csv")
+GENERALIZATION_CSV = os.path.join(OUTPUT_DIR, "generalization_results.csv")
+PORTABILITY_CSV = os.path.join(OUTPUT_DIR, "portability_results.csv")
+SPECIFICITY_CSV = os.path.join(OUTPUT_DIR, "specificity_results.csv")
 
 # Đảm bảo các thư mục đầu ra tồn tại trước khi chạy
-os.makedirs(os.path.dirname(DEP_JSON), exist_ok=True)
-os.makedirs(os.path.dirname(DEP_CSV), exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Các tham số inference
 BATCH_SIZE = 64  # Tùy chỉnh (4, 8, 16) tùy theo VRAM GPU của bạn
@@ -40,15 +46,255 @@ MAX_PROMPT_LENGTH = 2048
 # ==========================================
 # CÁC HÀM TIỆN ÍCH (UTILITIES)
 # ==========================================
-def check_api_usage(generated_line, target_api, alias_dict):
-    """Kiểm tra xem API sinh ra có khớp với target hay không bằng Regex để tránh nhận diện chuỗi con."""
-    for key, value in alias_dict.items():
-        if value == target_api:
-            pattern = r'\b' + re.escape(key) + r'\b'
-            
-            if re.search(pattern, generated_line):
-                return True
+def clean_generated_text(raw_text):
+    return raw_text.replace("```python", "").replace("```", "").strip()
+
+
+def normalize_line(text):
+    if not text:
+        return ""
+    return re.sub(r"\s+", " ", text.strip())
+
+
+def get_first_line(text):
+    return text.split("\n")[0] if text else ""
+
+
+def build_prompt(code_context):
+    return (
+        "Complete and output the next line for the following Python function:\n"
+        "```python\n"
+        f"{code_context}"
+    )
+
+
+def truncate_context_for_prompt(tokenizer, code_context):
+    encoded_context = tokenizer.encode(code_context, add_special_tokens=False)
+    if len(encoded_context) > MAX_PROMPT_LENGTH - 200:
+        encoded_context = encoded_context[-(MAX_PROMPT_LENGTH - 200):]
+        return tokenizer.decode(encoded_context)
+    return code_context
+
+
+def to_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def normalize_api(api_name):
+    if not isinstance(api_name, str):
+        return ""
+    return api_name.strip()
+
+
+def candidate_api_tokens(target_api, alias_dict):
+    tokens = set()
+    api_name = normalize_api(target_api)
+    if not api_name:
+        return []
+
+    tokens.add(api_name)
+    tokens.add(api_name.split(".")[-1])
+
+    if isinstance(alias_dict, dict):
+        for alias, canonical in alias_dict.items():
+            if normalize_api(canonical) == api_name:
+                tokens.add(normalize_api(alias))
+
+    return [tok for tok in tokens if tok]
+
+
+def contains_token(text, token):
+    if not text or not token:
+        return False
+    pattern = r"(?<![A-Za-z0-9_])" + re.escape(token) + r"(?![A-Za-z0-9_])"
+    return re.search(pattern, text) is not None
+
+
+def check_api_usage(text, target_api, alias_dict):
+    if not target_api:
+        return False
+    for token in candidate_api_tokens(target_api, alias_dict):
+        if contains_token(text, token):
+            return True
     return False
+
+
+def check_any_api_usage(text, api_list, alias_dict):
+    for api in to_list(api_list):
+        if check_api_usage(text, api, alias_dict):
+            return True
+    return False
+
+
+def check_pred_api_usage(text, pred_api_list):
+    for token in to_list(pred_api_list):
+        if contains_token(text, token):
+            return True
+    return False
+
+
+def write_csv(records, file_path):
+    if not records:
+        with open(file_path, mode="w", newline="", encoding="utf-8-sig") as file:
+            writer = csv.writer(file)
+            writer.writerow(["empty"])
+            writer.writerow(["no_records"])
+        return
+
+    keys = sorted({k for rec in records for k in rec.keys()})
+    with open(file_path, mode="w", newline="", encoding="utf-8-sig") as file:
+        writer = csv.DictWriter(file, fieldnames=keys)
+        writer.writeheader()
+        writer.writerows(records)
+
+
+def build_evaluation_samples(data):
+    samples = []
+    by_case_id = {item.get("case-id"): item for item in data if item.get("case-id")}
+
+    for idx, item in enumerate(data):
+        case_id = item.get("case-id", f"case-{idx}")
+        alias_dict = item.get("alias dict", {}) or {}
+        replacement_api = item.get("replacement api", "")
+        deprecated_apis = to_list(item.get("deprecated api", []))
+
+        probing_input = item.get("probing input", "")
+        if probing_input:
+            samples.append({
+                "sample_id": f"{case_id}::effectiveness",
+                "case_id": case_id,
+                "test_type": "effectiveness",
+                "input_text": probing_input,
+                "replacement_api": replacement_api,
+                "deprecated_apis": deprecated_apis,
+                "alias_dict": alias_dict,
+                "reference": item.get("reference", ""),
+                "raw_item_index": idx,
+            })
+
+        rephrase_input = item.get("rephrase", "")
+        if rephrase_input:
+            samples.append({
+                "sample_id": f"{case_id}::generalization",
+                "case_id": case_id,
+                "test_type": "generalization",
+                "input_text": rephrase_input,
+                "replacement_api": replacement_api,
+                "deprecated_apis": deprecated_apis,
+                "alias_dict": alias_dict,
+                "reference": item.get("rephrase_reference", ""),
+                "raw_item_index": idx,
+            })
+
+        portability_case_id = item.get("portability", "")
+        portability_input = ""
+        portability_reference_case = by_case_id.get(portability_case_id)
+        if portability_reference_case:
+            portability_input = portability_reference_case.get("probing input", "")
+
+        if portability_input:
+            samples.append({
+                "sample_id": f"{case_id}::portability::{portability_case_id}",
+                "case_id": case_id,
+                "test_type": "portability",
+                "input_text": portability_input,
+                "replacement_api": replacement_api,
+                "deprecated_apis": deprecated_apis,
+                "alias_dict": alias_dict,
+                "reference": "",
+                "portability_target_case": portability_case_id,
+                "portability_target_replacement_api": portability_reference_case.get("replacement api", ""),
+                "raw_item_index": idx,
+            })
+
+        specific_items = item.get("Specificity-SimilarContext", []) or []
+        for s_idx, spec_case in enumerate(specific_items):
+            spec_input = spec_case.get("probing input", "")
+            if not spec_input:
+                continue
+
+            samples.append({
+                "sample_id": f"{case_id}::specificity::{s_idx}",
+                "case_id": case_id,
+                "test_type": "specificity",
+                "input_text": spec_input,
+                "replacement_api": replacement_api,
+                "deprecated_apis": deprecated_apis,
+                "alias_dict": alias_dict,
+                "reference": "",
+                "specificity_prediction": spec_case.get("prediction", ""),
+                "specificity_pred_api": to_list(spec_case.get("pred-api", [])),
+                "raw_item_index": idx,
+            })
+
+    return samples
+
+
+def evaluate_sample(sample, generated_line, generated_line_concat, generated_block):
+    test_type = sample["test_type"]
+    alias_dict = sample.get("alias_dict", {})
+    replacement_api = sample.get("replacement_api", "")
+
+    texts_to_check = [generated_line, generated_line_concat, generated_block]
+    replacement_hit = any(check_api_usage(text, replacement_api, alias_dict) for text in texts_to_check)
+    deprecated_hit = any(check_any_api_usage(text, sample.get("deprecated_apis", []), alias_dict) for text in texts_to_check)
+
+    reference = sample.get("reference", "")
+    reference_exact_match = False
+    if reference:
+        reference_exact_match = (
+            normalize_line(generated_line) == normalize_line(reference)
+            or normalize_line(generated_line_concat) == normalize_line(reference)
+        )
+
+    specificity_prediction = sample.get("specificity_prediction", "")
+    specificity_exact_match = False
+    if specificity_prediction:
+        specificity_exact_match = (
+            normalize_line(generated_line) == normalize_line(specificity_prediction)
+            or normalize_line(generated_line_concat) == normalize_line(specificity_prediction)
+        )
+
+    specificity_pred_api_hit = any(
+        check_pred_api_usage(text, sample.get("specificity_pred_api", []))
+        for text in texts_to_check
+    )
+
+    if test_type == "specificity":
+        passed = specificity_exact_match or specificity_pred_api_hit
+    else:
+        passed = replacement_hit
+
+    return {
+        "sample_id": sample.get("sample_id", ""),
+        "case_id": sample.get("case_id", ""),
+        "test_type": test_type,
+        "raw_item_index": sample.get("raw_item_index", -1),
+        "prompt": sample.get("input_text", ""),
+        "generated_line": generated_line,
+        "generated_line_concat": generated_line_concat,
+        "generated_block": generated_block,
+        "replacement_api": replacement_api,
+        "replacement_hit": replacement_hit,
+        "deprecated_apis": " | ".join(sample.get("deprecated_apis", [])),
+        "deprecated_hit": deprecated_hit,
+        "reference": reference,
+        "reference_exact_match": reference_exact_match,
+        "specificity_prediction": specificity_prediction,
+        "specificity_exact_match": specificity_exact_match,
+        "specificity_pred_api": " | ".join(sample.get("specificity_pred_api", [])),
+        "specificity_pred_api_hit": specificity_pred_api_hit,
+        "portability_target_case": sample.get("portability_target_case", ""),
+        "portability_target_replacement_api": sample.get("portability_target_replacement_api", ""),
+        "passed": passed,
+    }
+
 
 # ==========================================
 # LUỒNG CHẠY CHÍNH (MAIN FUNCTION)
@@ -82,54 +328,31 @@ def main():
     print(f"[*] Đang đọc file dữ liệu: {INPUT_FILE_PATH}")
     with open(INPUT_FILE_PATH, 'r', encoding='utf-8') as f:
         data = json.load(f)
-        
-    # data = data[:1000]
 
-    num_samples = len(data)
-    num_good = 0
-    num_bad = 0
-    mismatched_results = []
-    old_api_cases = []
-    new_api_cases = []
+    samples = build_evaluation_samples(data)
+    print(f"[*] Tổng số mẫu đánh giá sau khi bung 4 bài test: {len(samples)}")
 
     # 5. Bắt đầu vòng lặp xử lý (CHẠY BATCH)
-    pbar = tqdm(range(0, num_samples, BATCH_SIZE), desc="Processing Batches")
+    all_records = []
+    pbar = tqdm(range(0, len(samples), BATCH_SIZE), desc="Processing Batches")
 
     for i in pbar:
-        # Lấy ra 1 batch dữ liệu
-        batch_data = data[i : i + BATCH_SIZE]
-        
+        batch_samples = samples[i: i + BATCH_SIZE]
         batch_prompts = []
         batch_meta = []
 
-        # Chuẩn bị prompt cho toàn bộ batch
-        for item in batch_data:
-            code_context = item.get("prompt", "")
-            
-            # Cắt ngắn nếu quá dài
-            encoded_context = tokenizer.encode(code_context, add_special_tokens=False)
-            if len(encoded_context) > MAX_PROMPT_LENGTH - 200:
-                encoded_context = encoded_context[-(MAX_PROMPT_LENGTH - 200):]
-                code_context = tokenizer.decode(encoded_context)
-
-            # Thay thế bằng prompt mới của bạn kết hợp mẹo mở thẻ code
-            prompt_text = (
-                f"Complete and output the next line for the following Python function:\n"
-                f"```python\n"
-                f"{code_context}"
-            )
-            
+        for sample in batch_samples:
+            code_context = sample.get("input_text", "")
+            code_context = truncate_context_for_prompt(tokenizer, code_context)
+            prompt_text = build_prompt(code_context)
             batch_prompts.append(prompt_text)
-            batch_meta.append({
-                "code_context": code_context,
-                "deprecated_api": item.get("deprecated_api", ""),
-                "replacement_api": item.get("replacement_api", ""),
-                "alias_dict": item.get("alias_dict", {})
-            })
 
-        # Tokenize toàn bộ batch cùng lúc
+            sample_copy = dict(sample)
+            sample_copy["input_text"] = code_context
+            batch_meta.append(sample_copy)
+
         inputs = tokenizer(
-            batch_prompts, 
+            batch_prompts,
             return_tensors="pt",
             padding=True,
             truncation=True,
@@ -152,84 +375,105 @@ def main():
         generated_tokens = outputs[:, input_length:]
         generated_texts = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
 
-        # Đánh giá kết quả cho từng sample trong batch
+        # Đánh giá kết quả cho từng sample trong batch theo 4 test
         for idx, generated_text in enumerate(generated_texts):
-            meta = batch_meta[idx]
-            global_id = i + idx # ID thật của sample trong data gốc
-            
-            clean_text = generated_text.replace("```python", "").replace("```", "").strip()
-            first_line_generated = clean_text.split('\n')[0]
+            sample = batch_meta[idx]
+            clean_text = clean_generated_text(generated_text)
+            first_line_generated = get_first_line(clean_text)
 
-            # Nối dòng cuối của prompt với code gen ra để tạo context hoàn chỉnh
-            last_line_of_prompt = meta["code_context"].split('\n')[-1]
-            full_line_to_check = last_line_of_prompt + first_line_generated
+            last_line_of_prompt = ""
+            input_text = sample.get("input_text", "")
+            if input_text:
+                last_line_of_prompt = input_text.split("\n")[-1]
 
-            # Đưa full_line_to_check vào đánh giá thay vì first_line
-            is_replacement = check_api_usage(full_line_to_check, meta["replacement_api"], meta["alias_dict"])
-            is_deprecated = check_api_usage(full_line_to_check, meta["deprecated_api"], meta["alias_dict"])
+            generated_concat = (last_line_of_prompt + first_line_generated).strip()
 
-            # Tạo record chuẩn Dictionary
-            record = {
-                "id": global_id,
-                "prompt": meta["code_context"],
-                "deprecated_api": meta["deprecated_api"],
-                "replacement_api": meta["replacement_api"],
-                "generated_content": full_line_to_check # Lưu lại chuỗi hoàn chỉnh để dễ debug
-            }
+            record = evaluate_sample(
+                sample,
+                generated_line=first_line_generated,
+                generated_line_concat=generated_concat,
+                generated_block=clean_text,
+            )
+            all_records.append(record)
 
-            if is_replacement:
-                num_good += 1
-                new_api_cases.append(record)
-            elif is_deprecated:
-                num_bad += 1
-                old_api_cases.append(record)
-            else:
-                mismatched_results.append(record)
-                
-        # Cập nhật thông số lên thanh tiến trình (tqdm)
+        current_pass = sum(1 for r in all_records if r["passed"])
         pbar.set_postfix({
-            "good": num_good,
-            "bad": num_bad,
-            "mismatch": len(mismatched_results)
+            "processed": len(all_records),
+            "passed": current_pass,
+            "failed": len(all_records) - current_pass,
         })
 
     # 6. Lưu kết quả ra file
     print("\n[*] Đang lưu các file kết quả...")
-    
-    # Lưu định dạng JSON
-    with open(MIS_JSON, "w", encoding="utf-8") as f:
-        json.dump(mismatched_results, f, ensure_ascii=False, indent=4)
-    
-    with open(REP_JSON, "w", encoding="utf-8") as f:
-        json.dump(new_api_cases, f, ensure_ascii=False, indent=4)
-        
-    with open(DEP_JSON, "w", encoding="utf-8") as f:
-        json.dump(old_api_cases, f, ensure_ascii=False, indent=4)
 
-    # Lưu định dạng CSV (Sử dụng DictWriter)
-    csv_headers = ["id", "prompt", "deprecated_api", "replacement_api", "generated_content"]
+    effectiveness_records = [r for r in all_records if r["test_type"] == "effectiveness"]
+    generalization_records = [r for r in all_records if r["test_type"] == "generalization"]
+    portability_records = [r for r in all_records if r["test_type"] == "portability"]
+    specificity_records = [r for r in all_records if r["test_type"] == "specificity"]
 
-    with open(MIS_CSV, mode='w', newline='', encoding='utf-8-sig') as file:
-        writer = csv.DictWriter(file, fieldnames=csv_headers)
-        writer.writeheader()
-        writer.writerows(mismatched_results)
+    with open(ALL_RESULTS_JSON, "w", encoding="utf-8") as f:
+        json.dump(all_records, f, ensure_ascii=False, indent=2)
 
-    with open(REP_CSV, mode='w', newline='', encoding='utf-8-sig') as file:
-        writer = csv.DictWriter(file, fieldnames=csv_headers)
-        writer.writeheader()
-        writer.writerows(new_api_cases)
-        
-    with open(DEP_CSV, mode='w', newline='', encoding='utf-8-sig') as file:
-        writer = csv.DictWriter(file, fieldnames=csv_headers)
-        writer.writeheader()
-        writer.writerows(old_api_cases)
+    with open(EFFECTIVENESS_JSON, "w", encoding="utf-8") as f:
+        json.dump(effectiveness_records, f, ensure_ascii=False, indent=2)
+    with open(GENERALIZATION_JSON, "w", encoding="utf-8") as f:
+        json.dump(generalization_records, f, ensure_ascii=False, indent=2)
+    with open(PORTABILITY_JSON, "w", encoding="utf-8") as f:
+        json.dump(portability_records, f, ensure_ascii=False, indent=2)
+    with open(SPECIFICITY_JSON, "w", encoding="utf-8") as f:
+        json.dump(specificity_records, f, ensure_ascii=False, indent=2)
+
+    write_csv(all_records, ALL_RESULTS_CSV)
+    write_csv(effectiveness_records, EFFECTIVENESS_CSV)
+    write_csv(generalization_records, GENERALIZATION_CSV)
+    write_csv(portability_records, PORTABILITY_CSV)
+    write_csv(specificity_records, SPECIFICITY_CSV)
+
+    def build_summary(records):
+        total = len(records)
+        passed = sum(1 for r in records if r["passed"])
+        failed = total - passed
+        pass_rate = (passed / total) if total > 0 else 0.0
+
+        replacement_hit = sum(1 for r in records if r.get("replacement_hit"))
+        deprecated_hit = sum(1 for r in records if r.get("deprecated_hit"))
+        reference_exact = sum(1 for r in records if r.get("reference_exact_match"))
+        specificity_exact = sum(1 for r in records if r.get("specificity_exact_match"))
+        specificity_pred_api_hit = sum(1 for r in records if r.get("specificity_pred_api_hit"))
+
+        return {
+            "total": total,
+            "passed": passed,
+            "failed": failed,
+            "pass_rate": round(pass_rate, 6),
+            "replacement_hit": replacement_hit,
+            "deprecated_hit": deprecated_hit,
+            "reference_exact_match": reference_exact,
+            "specificity_exact_match": specificity_exact,
+            "specificity_pred_api_hit": specificity_pred_api_hit,
+        }
+
+    summary = {
+        "model_name": MODEL_NAME,
+        "input_file": INPUT_FILE_PATH,
+        "total_samples": len(all_records),
+        "effectiveness": build_summary(effectiveness_records),
+        "generalization": build_summary(generalization_records),
+        "portability": build_summary(portability_records),
+        "specificity": build_summary(specificity_records),
+    }
+
+    with open(SUMMARY_JSON, "w", encoding="utf-8") as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
 
     # 7. In tổng kết
     print("\n================ TỔNG KẾT ================")
-    print(f"Số lượng mẫu lệch (Mismatched)   : {len(mismatched_results)}/{num_samples}")
-    print(f"Số lượng dùng API mới (Good)     : {num_good}/{num_samples}")
-    print(f"Số lượng dùng API cũ (Bad)       : {num_bad}/{num_samples}")
+    print(f"[Effectiveness] {summary['effectiveness']['passed']}/{summary['effectiveness']['total']} | pass_rate={summary['effectiveness']['pass_rate']:.4f}")
+    print(f"[Generalization] {summary['generalization']['passed']}/{summary['generalization']['total']} | pass_rate={summary['generalization']['pass_rate']:.4f}")
+    print(f"[Portability] {summary['portability']['passed']}/{summary['portability']['total']} | pass_rate={summary['portability']['pass_rate']:.4f}")
+    print(f"[Specificity] {summary['specificity']['passed']}/{summary['specificity']['total']} | pass_rate={summary['specificity']['pass_rate']:.4f}")
     print("==========================================")
+    print(f"[*] Đã lưu summary tại: {SUMMARY_JSON}")
 
 
 if __name__ == "__main__":
