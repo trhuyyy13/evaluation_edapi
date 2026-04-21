@@ -53,11 +53,14 @@ def main():
     
     print(f"Loading model: {model_path}")
     model_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        trust_remote_code=True,
-        torch_dtype=model_dtype,
-    )
+    model_kwargs = {
+        "trust_remote_code": True,
+        "torch_dtype": model_dtype,
+    }
+    if torch.cuda.is_available():
+        model_kwargs["device_map"] = "auto"
+
+    model = AutoModelForCausalLM.from_pretrained(model_path, **model_kwargs)
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(
@@ -88,9 +91,9 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.pad_token_id = tokenizer.eos_token_id
+    tokenizer.padding_side = "left"
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
     model.eval()
 
     # Số lượng data test. Đổi thành None nếu muốn chạy toàn bộ dataset.

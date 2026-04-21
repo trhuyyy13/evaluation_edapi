@@ -87,7 +87,9 @@ def batch_generate(model, tok, prompts, max_length, sample_generate=False):
         padding=True,
         truncation=True,
         return_tensors="pt",
-    ).to(model.device)
+    )
+    input_device = next(model.parameters()).device
+    prompt_tok = {k: v.to(input_device) for k, v in prompt_tok.items()}
     gen_args = {
             'inputs': prompt_tok['input_ids'],
             'attention_mask': prompt_tok['attention_mask'],

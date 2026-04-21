@@ -54,8 +54,10 @@ def compute_edit_quality(
 
     # for replace_api evaluation
     if 'replace_prompt' in record:
-        intent = _format_eval_prompt(record['replace_prompt'])
-        rewritten_intent = _format_eval_prompt(record['replace_rephrase_prompt'])
+        replace_prompt_text = _format_eval_prompt(record['replace_prompt'])
+        replace_rephrase_prompt_text = _format_eval_prompt(record['replace_rephrase_prompt'])
+        intent = replace_prompt_text
+        rewritten_intent = replace_rephrase_prompt_text
     
     ret = {}
     ret['gen_strs'] = []
@@ -92,10 +94,11 @@ def compute_edit_quality(
         
     _preds = [clean_pred(p) for p in gen_strs]
     if 'replace_prompt' in record:
-        _preds[0] = extract_first_func(record["replace_prompt"] + _preds[0])[len(record["prompt"]):]
-        _preds[1] = extract_first_func(record["replace_rephrase_prompt"] + _preds[1])[len(record["rephrase_prompt"]):]
+        _preds[0] = extract_first_func(replace_prompt_text + _preds[0])[len(replace_prompt_text):]
+        _preds[1] = extract_first_func(replace_rephrase_prompt_text + _preds[1])[len(replace_rephrase_prompt_text):]
         if portability != "":
-            _preds[2] = extract_first_func(record["portability"]["replace_prompt"] + _preds[2])[len(record["portability"]["prompt"]):]
+            portability_replace_prompt_text = _format_eval_prompt(record["portability"]["replace_prompt"])
+            _preds[2] = extract_first_func(portability_replace_prompt_text + _preds[2])[len(portability_replace_prompt_text):]
     gen_strs = [extract_first_statement(p, False) for p in _preds]
     gen_apis_prompt = [extract_apis_in_first_stmt(_preds[0], reference_dict, alias_dict)]
     gen_apis_rephrase = [extract_apis_in_first_stmt(_preds[1], rephrase_reference_dict, alias_dict)]
