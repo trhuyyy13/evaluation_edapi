@@ -45,7 +45,7 @@ def prepare_requests(data):
     return requests
 
 def main():
-    instruct_model_name = "deepseek-ai/deepseek-coder-1.3b-instruct"
+    instruct_model_name = "HuyTran1301/Deepseek_SimPO_ApiDeprecated"
     model_name = instruct_model_name
     script_dir = os.path.dirname(os.path.abspath(__file__))
     model_path = model_name
