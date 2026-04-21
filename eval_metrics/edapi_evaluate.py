@@ -22,9 +22,15 @@ import logging
 
 LOG = logging.getLogger(__name__)
 GEN_MAX_NEW_TOKENS = 128
+MAX_PROMPT_LENGTH = 2048
 
 
-def _format_eval_prompt(code_context: str) -> str:
+def _format_eval_prompt(code_context: str, tok=None) -> str:
+    if tok is not None:
+        encoded_context = tok.encode(code_context, add_special_tokens=False)
+        if len(encoded_context) > MAX_PROMPT_LENGTH - 200:
+            encoded_context = encoded_context[-(MAX_PROMPT_LENGTH - 200):]
+            code_context = tok.decode(encoded_context)
     return (
         f"Complete and output the next line for the following Python function:\n"
         f"```python\n"
@@ -41,8 +47,8 @@ def compute_edit_quality(
 ) -> typing.Dict:
     # First, unpack rewrite evaluation record.
     code_context = record['prompt']
-    intent = _format_eval_prompt(code_context)
-    rewritten_intent = _format_eval_prompt(record['rephrase_prompt'])
+    intent = _format_eval_prompt(code_context, tok)
+    rewritten_intent = _format_eval_prompt(record['rephrase_prompt'], tok)
     rewritten_target = record['rephrase_target_new']
     target_snippet = record['target_new']
     neighborhoods = record['specificity']
@@ -54,8 +60,8 @@ def compute_edit_quality(
 
     # for replace_api evaluation
     if 'replace_prompt' in record:
-        replace_prompt_text = _format_eval_prompt(record['replace_prompt'])
-        replace_rephrase_prompt_text = _format_eval_prompt(record['replace_rephrase_prompt'])
+        replace_prompt_text = _format_eval_prompt(record['replace_prompt'], tok)
+        replace_rephrase_prompt_text = _format_eval_prompt(record['replace_rephrase_prompt'], tok)
         intent = replace_prompt_text
         rewritten_intent = replace_rephrase_prompt_text
     
@@ -73,7 +79,7 @@ def compute_edit_quality(
                 [
                     intent,
                     rewritten_intent,
-                    _format_eval_prompt(portability['replace_prompt']),
+                    _format_eval_prompt(portability['replace_prompt'], tok),
                 ],
                 max_length=GEN_MAX_NEW_TOKENS,
             )
@@ -81,7 +87,7 @@ def compute_edit_quality(
             gen_strs = batch_generate(
                 model,
                 tok,
-                [intent, rewritten_intent, _format_eval_prompt(portability['prompt'])],
+                [intent, rewritten_intent, _format_eval_prompt(portability['prompt'], tok)],
                 max_length=GEN_MAX_NEW_TOKENS,
             )
     else:
@@ -97,7 +103,7 @@ def compute_edit_quality(
         _preds[0] = extract_first_func(replace_prompt_text + _preds[0])[len(replace_prompt_text):]
         _preds[1] = extract_first_func(replace_rephrase_prompt_text + _preds[1])[len(replace_rephrase_prompt_text):]
         if portability != "":
-            portability_replace_prompt_text = _format_eval_prompt(record["portability"]["replace_prompt"])
+            portability_replace_prompt_text = _format_eval_prompt(record["portability"]["replace_prompt"], tok)
             _preds[2] = extract_first_func(portability_replace_prompt_text + _preds[2])[len(portability_replace_prompt_text):]
     gen_strs = [extract_first_statement(p, False) for p in _preds]
     gen_apis_prompt = [extract_apis_in_first_stmt(_preds[0], reference_dict, alias_dict)]
@@ -147,7 +153,7 @@ def compute_edit_quality(
         gen_strs += batch_generate(
             model,
             tok,
-            _format_eval_prompt(prompt),
+            _format_eval_prompt(prompt, tok),
             max_length=GEN_MAX_NEW_TOKENS,
         )
     _preds = [clean_pred(p) for p in gen_strs]

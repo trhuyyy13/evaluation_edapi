@@ -45,10 +45,11 @@ def prepare_requests(data):
     return requests
 
 def main():
-    model_name = "deepseek-ai/deepseek-coder-1.3b-instruct""
+    instruct_model_name = "deepseek-ai/deepseek-coder-1.3b-instruct"
+    model_name = instruct_model_name
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    local_pretrained_path = os.path.join(script_dir, "deepseek_unlearned_simnpo")
-    model_path = local_pretrained_path if os.path.isdir(local_pretrained_path) else model_name
+    model_path = model_name
+    tokenizer_path = model_name
     dataset_path = os.path.join(script_dir, "dataset", "all.json")
     
     print(f"Loading model: {model_path}")
@@ -64,25 +65,25 @@ def main():
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(
-            model_path,
+            tokenizer_path,
             trust_remote_code=True,
             padding_side="left",
         )
     except Exception as e:
-        print(f"Default tokenizer load failed: {e}")
+        print(f"Tokenizer load from {tokenizer_path} failed: {e}")
         try:
-            print("Trying fast tokenizer...")
+            print(f"Trying instruct tokenizer fallback: {instruct_model_name}")
             tokenizer = AutoTokenizer.from_pretrained(
-                model_path,
+                instruct_model_name,
                 trust_remote_code=True,
                 padding_side="left",
                 use_fast=True,
             )
         except Exception as fast_e:
-            print(f"Fast tokenizer load failed: {fast_e}")
+            print(f"Fast instruct tokenizer load failed: {fast_e}")
             print("Falling back to slow tokenizer...")
             tokenizer = AutoTokenizer.from_pretrained(
-                model_path,
+                instruct_model_name,
                 trust_remote_code=True,
                 padding_side="left",
                 use_fast=False,

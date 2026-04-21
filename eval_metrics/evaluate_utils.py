@@ -96,14 +96,12 @@ def batch_generate(model, tok, prompts, max_length, sample_generate=False):
             'max_new_tokens': max_length,
             'pad_token_id': tok.eos_token_id,
             'eos_token_id': tok.eos_token_id,
-            'top_k': None,
-            'top_p': None,
+            'top_k': 0,
+            'top_p': 1.0,
             'temperature': 1.0,
             'do_sample': False,
             'num_beams': 1,
             'num_return_sequences': 1,
-            'repetition_penalty': 1.1,
-            'no_repeat_ngram_size': 3,
         }
     with torch.no_grad():
         if sample_generate:
