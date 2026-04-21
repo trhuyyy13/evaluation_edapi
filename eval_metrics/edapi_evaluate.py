@@ -21,6 +21,7 @@ from .evaluate_utils import (
 import logging
 
 LOG = logging.getLogger(__name__)
+GEN_MAX_NEW_TOKENS = 128
 
 
 def _format_eval_prompt(code_context: str) -> str:
@@ -53,8 +54,8 @@ def compute_edit_quality(
 
     # for replace_api evaluation
     if 'replace_prompt' in record:
-        intent = record['replace_prompt']
-        rewritten_intent = record['replace_rephrase_prompt']
+        intent = _format_eval_prompt(record['replace_prompt'])
+        rewritten_intent = _format_eval_prompt(record['replace_rephrase_prompt'])
     
     ret = {}
     ret['gen_strs'] = []
@@ -72,17 +73,22 @@ def compute_edit_quality(
                     rewritten_intent,
                     _format_eval_prompt(portability['replace_prompt']),
                 ],
-                max_length=50,
+                max_length=GEN_MAX_NEW_TOKENS,
             )
         else:
             gen_strs = batch_generate(
                 model,
                 tok,
                 [intent, rewritten_intent, _format_eval_prompt(portability['prompt'])],
-                max_length=50,
+                max_length=GEN_MAX_NEW_TOKENS,
             )
     else:
-        gen_strs = batch_generate(model, tok, [intent, rewritten_intent], max_length=50)
+        gen_strs = batch_generate(
+            model,
+            tok,
+            [intent, rewritten_intent],
+            max_length=GEN_MAX_NEW_TOKENS,
+        )
         
     _preds = [clean_pred(p) for p in gen_strs]
     if 'replace_prompt' in record:
@@ -135,7 +141,12 @@ def compute_edit_quality(
     ret['specificity'] = {}
     gen_strs = []
     for prompt in neighborhoods['prompts']:
-        gen_strs += batch_generate(model, tok, _format_eval_prompt(prompt), max_length=50)
+        gen_strs += batch_generate(
+            model,
+            tok,
+            _format_eval_prompt(prompt),
+            max_length=GEN_MAX_NEW_TOKENS,
+        )
     _preds = [clean_pred(p) for p in gen_strs]
     gen_strs = [extract_first_statement(p, False) for p in _preds]
     gen_apis = [extract_apis_in_first_stmt(p, {}, alias_dict) for p in gen_strs]

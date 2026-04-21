@@ -47,19 +47,21 @@ def prepare_requests(data):
 def main():
     model_name = "HuyTran1301/Deepseek_PROD_ApiDeprecated"
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    local_pretrained_path = os.path.join(script_dir, "deepseek_unlearned_simnpo")
+    model_path = local_pretrained_path if os.path.isdir(local_pretrained_path) else model_name
     dataset_path = os.path.join(script_dir, "dataset", "all.json")
     
-    print(f"Loading model: {model_name}")
+    print(f"Loading model: {model_path}")
     model_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
     model = AutoModelForCausalLM.from_pretrained(
-        model_name,
+        model_path,
         trust_remote_code=True,
         torch_dtype=model_dtype,
     )
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(
-            model_name,
+            model_path,
             trust_remote_code=True,
             padding_side="left",
         )
@@ -68,7 +70,7 @@ def main():
         try:
             print("Trying fast tokenizer...")
             tokenizer = AutoTokenizer.from_pretrained(
-                model_name,
+                model_path,
                 trust_remote_code=True,
                 padding_side="left",
                 use_fast=True,
@@ -77,7 +79,7 @@ def main():
             print(f"Fast tokenizer load failed: {fast_e}")
             print("Falling back to slow tokenizer...")
             tokenizer = AutoTokenizer.from_pretrained(
-                model_name,
+                model_path,
                 trust_remote_code=True,
                 padding_side="left",
                 use_fast=False,
