@@ -78,6 +78,9 @@ class Metric:
         return format_score(float(0))
 
 def batch_generate(model, tok, prompts, max_length, sample_generate=False):
+    if isinstance(prompts, str):
+        prompts = [prompts]
+
     prompt_tok = tok(
         prompts,
         add_special_tokens=True,
@@ -106,7 +109,11 @@ def batch_generate(model, tok, prompts, max_length, sample_generate=False):
                 'top_k': 5,
             })
         gen_tokens = model.generate(**gen_args)
-    return tok.batch_decode(gen_tokens[:, prompt_tok['input_ids'].shape[1]:])
+    return tok.batch_decode(
+        gen_tokens[:, prompt_tok['input_ids'].shape[1]:],
+        skip_special_tokens=True,
+        clean_up_tokenization_spaces=True,
+    )
 
 
 def test_generation_quality(
@@ -168,6 +175,9 @@ def compute_freq(sentence, n=2, tokenizer_for_fluency=None):
     return nltk.FreqDist(ngrams)
 
 def clean_pred(pred: str):
+    pred = pred.replace("Ċ", "\n")
+    pred = pred.replace("<｜end▁of▁sentence｜>", "")
+    pred = pred.replace("<|endoftext|>", "")
     lines = [line for line in pred.split("\n") if not line.strip().startswith("#")]
     return "\n".join(lines)
 

@@ -23,6 +23,14 @@ import logging
 LOG = logging.getLogger(__name__)
 
 
+def _format_eval_prompt(code_context: str) -> str:
+    return (
+        f"Complete and output the next line for the following Python function:\n"
+        f"```python\n"
+        f"{code_context}"
+    )
+
+
 def compute_edit_quality(
     model,
     tok,
@@ -32,13 +40,8 @@ def compute_edit_quality(
 ) -> typing.Dict:
     # First, unpack rewrite evaluation record.
     code_context = record['prompt']
-    prompt_text = (
-        f"Complete and output the next line for the following Python function:\n"
-        f"```python\n"
-        f"{code_context}"
-    )
-    intent = prompt_text
-    rewritten_intent = record['rephrase_prompt']
+    intent = _format_eval_prompt(code_context)
+    rewritten_intent = _format_eval_prompt(record['rephrase_prompt'])
     rewritten_target = record['rephrase_target_new']
     target_snippet = record['target_new']
     neighborhoods = record['specificity']
@@ -61,9 +64,23 @@ def compute_edit_quality(
     target_snippet_token = tok.encode(target_snippet)
     if portability != "":
         if 'replace_prompt' in record:
-            gen_strs = batch_generate(model, tok, [intent, rewritten_intent, portability['replace_prompt']], max_length=50)
+            gen_strs = batch_generate(
+                model,
+                tok,
+                [
+                    intent,
+                    rewritten_intent,
+                    _format_eval_prompt(portability['replace_prompt']),
+                ],
+                max_length=50,
+            )
         else:
-            gen_strs = batch_generate(model, tok, [intent, rewritten_intent, portability['prompt']], max_length=50)
+            gen_strs = batch_generate(
+                model,
+                tok,
+                [intent, rewritten_intent, _format_eval_prompt(portability['prompt'])],
+                max_length=50,
+            )
     else:
         gen_strs = batch_generate(model, tok, [intent, rewritten_intent], max_length=50)
         
@@ -118,7 +135,7 @@ def compute_edit_quality(
     ret['specificity'] = {}
     gen_strs = []
     for prompt in neighborhoods['prompts']:
-        gen_strs += batch_generate(model, tok, prompt, max_length=50)
+        gen_strs += batch_generate(model, tok, _format_eval_prompt(prompt), max_length=50)
     _preds = [clean_pred(p) for p in gen_strs]
     gen_strs = [extract_first_statement(p, False) for p in _preds]
     gen_apis = [extract_apis_in_first_stmt(p, {}, alias_dict) for p in gen_strs]
