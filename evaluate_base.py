@@ -184,8 +184,8 @@ def main():
         )
     
     model_tag = os.path.basename(model_path).replace("/", "_").replace(" ", "_")
-    results_path = os.path.join(script_dir, f"results_{model_tag}.json")
-    mean_results_path = os.path.join(script_dir, f"mean_results_{model_tag}.json")
+    results_path = os.path.join(script_dir, f"results_{model_tag}_2.json")
+    mean_results_path = os.path.join(script_dir, f"mean_results_{model_tag}_2.json")
     
     with open(results_path, "w") as f:
         json.dump(all_metrics, f, ensure_ascii=False, indent=4)
