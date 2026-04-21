@@ -9,8 +9,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 # ==========================================
 # THAM SỐ VÀ ĐƯỜNG DẪN CẤU HÌNH (CONFIGS)
 # ==========================================
-MODEL_NAME = "deepseek-ai/deepseek-coder-1.3b-instruct"
-MODEL_PATH = "deepseek-ai/deepseek-coder-1.3b-instruct"
+MODEL_NAME = "HuyTran1301/Deepseek_SimPO_ApiDeprecated"
+MODEL_PATH = "HuyTran1301/Deepseek_SimPO_ApiDeprecated"
 
 BASE_DIR = os.path.dirname(__file__)
 STATUS = "simnpo"
